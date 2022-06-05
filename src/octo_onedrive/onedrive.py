@@ -1,6 +1,7 @@
 import base64
 import logging
 import os
+import secrets
 from subprocess import call
 import threading
 import urllib.parse
@@ -19,10 +20,25 @@ ENCRYPT_CACHE = True
 # Built on the assumption we will only ever have one account logged in at a time
 class OneDriveComm:
     def __init__(self, app_id, scopes, token_cache_path, encryption_key=None, logger="octo_onedrive.OneDriveComm"):
+        """
+        OneDrive Communication class
+
+        Parameters
+        ----------
+        app_id: str
+            The application ID for the app registered with Microsoft
+        scopes: list
+            The scopes to request access to
+        token_cache_path: str
+            The path to the token cache file
+        encryption_key: str
+            The encryption key to use for the token cache
+        logger: str
+            The logger to use for logging
+        """
         self._logger = logging.getLogger(
             logger
         )
-
         self.cache = PersistentTokenStore(token_cache_path, encryption_key, logger=logger + "PersistentTokenStore")
         self.cache.load()
 
@@ -36,7 +52,7 @@ class OneDriveComm:
         self.auth_poll_thread: Optional[threading.Thread] = None
         self.flow_in_progress: Optional[dict] = None
 
-    def begin_auth_flow(self) -> dict:
+    def begin_auth_flow(self, on_success: callable, on_error: callable) -> dict:
         if self.auth_poll_thread is None or not self.auth_poll_thread.is_alive():
             # Remove any accounts before adding a new one
             self.forget_account()
@@ -46,7 +62,7 @@ class OneDriveComm:
             # Thread to poll graph for auth result
             self.auth_poll_thread = threading.Thread(
                 target=self.acquire_token,
-                kwargs={"flow": self.flow_in_progress},
+                kwargs={"flow": self.flow_in_progress, "on_success": on_success, "on_error": on_error},
             )
             self.auth_poll_thread.start()
             return self.flow_in_progress
@@ -112,9 +128,9 @@ class OneDriveComm:
         file_name,
         file_path,
         upload_location_id,  # TODO change configuration check to before this is called, in the main plugin
-        on_progress_update=lambda x: None,
+        on_upload_progress=lambda x: None,
         on_upload_complete=lambda: None,
-        on_error=lambda x: None,
+        on_upload_error=lambda x: None,
     ):
         # https://docs.microsoft.com/en-us/graph/api/driveitem-createuploadsession?view=graph-rest-1.0
 
@@ -122,13 +138,13 @@ class OneDriveComm:
             self._logger.error("No accounts registered, can't upload file")
             return
 
-        if not callable(on_progress_update):
+        if not callable(on_upload_progress):
             raise TypeError("on_progress_update must be callable")
 
         if not callable(on_upload_complete):
             raise TypeError("on_upload_complete must be callable")
 
-        if not callable(on_error):
+        if not callable(on_upload_error):
             raise TypeError("on_error must be callable")
 
         self._logger.info(f"Starting upload session for {file_name}")
@@ -200,7 +216,7 @@ class OneDriveComm:
                         f"content_range_start: {content_range_start}, content_range_end: {content_range_end}"
                     )
                     # Notify of upload progress, as integer percentage
-                    on_progress_update((100 * i) // number_of_uploads)
+                    on_upload_progress((100 * i) // number_of_uploads)
 
                     chunk = f.read(chunk_size)
 
@@ -224,14 +240,14 @@ class OneDriveComm:
                         self._logger.error(
                             f"Error uploading chunk {i}: {response['error']}"
                         )
-                        on_error(response["error"])
+                        on_upload_error(response["error"])
                         return
 
                     self._logger.debug(f"Chunk {i} upload complete")
 
         except Exception as e:
             self._logger.error(f"Error uploading file: {e}")
-            on_error(repr(e))
+            on_upload_error(repr(e))
             return
 
         # If we got this far... Everything worked?
@@ -336,10 +352,10 @@ class PersistentTokenStore(SerializableTokenCache):
         self.path = path
         self._logger = logging.getLogger(logger)
 
-        if isinstance(secret_key, str) or secret_key is not None:
+        if not isinstance(secret_key, str) and secret_key is not None:
             raise TypeError("secret_key must be a string, or None")
 
-        if self.secret_key is None:
+        if secret_key is None:
             self._logger.warning("No secret key provided, cache will be unencrypted")
 
         self.secret_key = secret_key
