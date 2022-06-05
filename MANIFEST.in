@@ -1,0 +1,2 @@
+include versioneer.py
+include src/octo_onedrive/_version.py

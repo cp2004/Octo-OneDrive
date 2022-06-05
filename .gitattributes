@@ -1,0 +1,2 @@
+octo_onedrive/_version.py export-subst
+src/octo_onedrive/_version.py export-subst
