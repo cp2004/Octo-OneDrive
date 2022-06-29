@@ -7,3 +7,7 @@ dist
 *.egg*
 .DS_Store
 *.zip
+
+
+# Ignore my experiments
+experiments
