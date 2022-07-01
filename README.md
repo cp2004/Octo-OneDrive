@@ -9,4 +9,3 @@ It is hosted on PyPi and can be installed with pip:
 ```
 pip install octo-onedrive
 ```
-

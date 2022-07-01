@@ -6,8 +6,8 @@ import urllib.parse
 from typing import Optional
 
 import requests
-from dateutil.parser import parse
 from cryptography.fernet import Fernet, InvalidToken
+from dateutil.parser import parse
 from msal import PublicClientApplication, SerializableTokenCache
 
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
