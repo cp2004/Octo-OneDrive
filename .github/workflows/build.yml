@@ -1,0 +1,132 @@
+name: Build
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 🔨 Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: 🏗 Set up Python 3.7
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: 🏗 Install build dependencies
+        run: |
+          python -m pip install wheel --user
+      - name: 🔨 Build a binary wheel and a source tarball
+        run: |
+          python setup.py sdist bdist_wheel
+      - name: ⬆ Upload build result
+        uses: actions/upload-artifact@v1
+        with:
+          name: dist
+          path: dist
+
+  pre-commit:
+    name: 🧹 Pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: 🏗 Set up Python 3.7
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+      - name: 🏗 Set up dev dependencies
+        run: |
+          pip install -e .
+      - name: 🚀 Run pre-commit
+        run: |
+          pre-commit run --all-files --show-diff-on-failure
+
+  # Currently no unit tests for this package, may be added in the future
+  # test-unit:
+  #   name: 🧪 Unit tests
+  #   strategy:
+  #     matrix:
+  #       python: ["3.7", "3.8", "3.9", "3.10"]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - name: 🏗 Set up Python ${{ matrix.python }}
+  #       uses: actions/setup-python@v1
+  #       with:
+  #         python-version: ${{ matrix.python }}
+  #     - name: 🏗 Set up test dependencies
+  #       run: |
+  #         pip install -e .[develop]
+  #     - name: 🚀 Run test suite
+  #       run: |
+  #         pytest
+
+  test-install:
+    name: 🧪 Installation tests
+    needs: build
+    strategy:
+      matrix:
+        python: ["3.7", "3.8", "3.9", "3.10"]
+        installable: ["wheel", "sdist"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇ Download build result
+        uses: actions/download-artifact@v1
+        with:
+          name: dist
+          path: dist
+      - name: 🏗 Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 🚀 Install wheel
+        if: matrix.installable == 'wheel'
+        run: |
+          pip install dist/octo_onedrive-*-py2.py3-none-any.whl
+      - name: 🚀 Install source tarball
+        if: matrix.installable == 'sdist'
+        run: |
+          pip install dist/octo_onedrive-*.tar.gz
+
+  publish-on-testpypi:
+    name: 📦 Publish on TestPyPI
+    if: github.event_name == 'release' && github.repository == 'cp2004/Octo-OneDrive'
+    needs:
+      - pre-commit
+      - test-install
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇ Download build result
+        uses: actions/download-artifact@v1
+        with:
+          name: dist
+          path: dist
+      - name: 📦 Publish to index
+        uses: pypa/gh-action-pypi-publish@master
+        continue-on-error: true
+        with:
+          user: __token__
+          password: ${{ secrets.TESTPYPI_TOKEN }}
+          repository_url: https://test.pypi.org/legacy/
+
+  publish-on-pypi:
+    name: 📦 Publish tagged releases to PyPI
+    if: github.event_name == 'release' && github.repository == 'cp2004/Octo-OneDrive'
+    needs: publish-on-testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇ Download build result
+        uses: actions/download-artifact@v1
+        with:
+          name: dist
+          path: dist
+      - name: 📦 Publish to index
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_TOKEN }}
