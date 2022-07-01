@@ -24,7 +24,7 @@ setuptools.setup(
         "Bug Tracker": "https://github.com/cp2004/Octo-OneDrive/issues",
     },
     classifiers=[
-        "Programming Language :: Python :: 3 :: Only"
+        "Programming Language :: Python :: 3 :: Only",
         "License :: OSI Approved :: GNU Affero General Public License v3",
         "Operating System :: OS Independent",
         "Development Status :: 5 - Production/Stable"
