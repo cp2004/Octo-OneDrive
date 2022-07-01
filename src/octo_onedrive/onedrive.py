@@ -1,25 +1,31 @@
 import base64
 import logging
 import os
-import secrets
-from subprocess import call
 import threading
 import urllib.parse
 from typing import Optional
 
 import requests
+from dateutil.parser import parse
 from cryptography.fernet import Fernet, InvalidToken
 from msal import PublicClientApplication, SerializableTokenCache
 
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
 REQUEST_TIMEOUT = 5  # Seconds
 UNKNOWN_ERROR = "Unknown error, check octoprint.log for details"
-ENCRYPT_CACHE = True
 
 
 # Built on the assumption we will only ever have one account logged in at a time
 class OneDriveComm:
-    def __init__(self, app_id, scopes, token_cache_path, encryption_key=None, logger="octo_onedrive.OneDriveComm"):
+    def __init__(
+        self,
+        app_id,
+        scopes,
+        token_cache_path,
+        authority="https://login.microsoftonline.com/common",
+        encryption_key=None,
+        logger="octo_onedrive.OneDriveComm",
+    ):
         """
         OneDrive Communication class
 
@@ -36,15 +42,15 @@ class OneDriveComm:
         logger: str
             The logger to use for logging
         """
-        self._logger = logging.getLogger(
-            logger
+        self._logger = logging.getLogger(logger)
+        self.cache = PersistentTokenStore(
+            token_cache_path, encryption_key, logger=logger + "PersistentTokenStore"
         )
-        self.cache = PersistentTokenStore(token_cache_path, encryption_key, logger=logger + "PersistentTokenStore")
         self.cache.load()
 
         self.client = PublicClientApplication(
             app_id,
-            authority="https://login.microsoftonline.com/common",
+            authority=authority,
             token_cache=self.cache,
         )
         self.scopes = scopes
@@ -62,14 +68,20 @@ class OneDriveComm:
             # Thread to poll graph for auth result
             self.auth_poll_thread = threading.Thread(
                 target=self.acquire_token,
-                kwargs={"flow": self.flow_in_progress, "on_success": on_success, "on_error": on_error},
+                kwargs={
+                    "flow": self.flow_in_progress,
+                    "on_success": on_success,
+                    "on_error": on_error,
+                },
             )
             self.auth_poll_thread.start()
             return self.flow_in_progress
         else:
             raise AuthInProgressError("Auth flow is already in progress")
 
-    def acquire_token(self, flow: dict, on_success: callable, on_error: callable) -> None:
+    def acquire_token(
+        self, flow: dict, on_success: callable, on_error: callable
+    ) -> None:
         response = self.client.acquire_token_by_device_flow(flow)
         if "access_token" in response:
             # Flow was successful
@@ -90,7 +102,73 @@ class OneDriveComm:
             # Assuming that we never get more than one account
             self.client.remove_account(self.client.get_accounts()[0])
 
-    def list_folders(self, item_id=None):
+    def list_files_and_folders(self, folder_id=None):
+        response = self._list(folder_id)
+        if "error" in response:
+            return response  # Don't post-process, just send the message on
+
+        items = []
+        for item in response:
+            if "folder" in item:
+                item_type = "folder"
+            elif "file" in item:
+                item_type = "file"
+            else:
+                # Unknown type so ignore
+                continue
+
+            new_item = {
+                "type": item_type,
+                "name": item["name"],
+                "id": item["id"],
+                "parent": item["parentReference"]["id"],
+                "path": item["parentReference"]["path"].split("/root:")[1]
+                + "/"
+                + item["name"],  # Human readable path
+            }
+
+            if item_type == "folder":
+                new_item["childCount"] = item["folder"]["childCount"]
+
+            elif item_type == "file":
+                # We'll need this information to determine whether to sync the file
+                new_item["eTag"] = item["eTag"]
+                # If this can be stored along with the file in OctoPrint, it will make life
+                # WAY easier to compare whether files have changed.
+                # For two way sync I will need to know which is newer though
+                new_item["lastModified"] = parse(
+                    item["lastModifiedDateTime"]
+                ).timestamp()
+                # Convert to unix timestamp, like OctoPrint's internal store for comparison
+                new_item["downloadUrl"] = (item["@microsoft.graph.downloadUrl"],)
+
+            items.append(new_item)
+
+        return {"root": True if folder_id is None else False, "items": items}
+
+    def list_folders(self, folder_id=None):
+        response = self._list(folder_id)
+        if "error" in response:
+            return response  # Don't post-process, just send the message on
+
+        folders = []
+        for item in response:
+            if "folder" in item:
+                folders.append(
+                    {
+                        "name": item["name"],
+                        "id": item["id"],
+                        "parent": item["parentReference"]["id"],
+                        "childCount": item["folder"]["childCount"],
+                        "path": item["parentReference"]["path"].split("/root:")[1]
+                        + "/"
+                        + item["name"],  # Human readable path
+                    }
+                )
+
+        return {"root": True if folder_id is None else False, "folders": folders}
+
+    def _list(self, item_id=None):
         if not len(self.client.get_accounts()):
             self._logger.error("No accounts registered, can't list folders")
             return {"error": {"message": "No accounts registered"}}
@@ -100,28 +178,12 @@ class OneDriveComm:
         else:
             location = f"items/{item_id}"
 
-        folders = []
         data = self._graph_request(f"/me/drive/{location}/children")
+
         if "error" in data:
             return {"error": data["error"]}  # No extra fields slipping in
-
         else:
-            value = data["value"]
-            for item in value:
-                if "folder" in item:
-                    folders.append(
-                        {
-                            "name": item["name"],
-                            "id": item["id"],
-                            "parent": item["parentReference"]["id"],
-                            "childCount": item["folder"]["childCount"],
-                            "path": item["parentReference"]["path"].split("/root:")[1]
-                            + "/"
-                            + item["name"],  # Human readable path
-                        }
-                    )
-
-        return {"root": True if item_id is None else False, "folders": folders}
+            return data["value"]
 
     def upload_file(
         self,
@@ -347,7 +409,9 @@ class PersistentTokenStore(SerializableTokenCache):
             )
     """
 
-    def __init__(self, path, secret_key=None, logger="octo_onedrive.PersistentTokenStore"):
+    def __init__(
+        self, path, secret_key=None, logger="octo_onedrive.PersistentTokenStore"
+    ):
         super().__init__()
         self.path = path
         self._logger = logging.getLogger(logger)
