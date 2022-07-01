@@ -33,4 +33,5 @@ setuptools.setup(
     packages=setuptools.find_packages(where="src"),
     python_requires=">=3.7",
     cmdclass=versioneer.get_cmdclass(),
+    install_requires=DEPENDENCIES,
 )
