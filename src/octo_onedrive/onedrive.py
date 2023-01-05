@@ -43,9 +43,7 @@ class OneDriveComm:
             The logger to use for logging
         """
         self._logger = logging.getLogger(logger)
-        self.cache = PersistentTokenStore(
-            token_cache_path, encryption_key, logger=logger + "PersistentTokenStore"
-        )
+        self.cache = PersistentTokenStore(token_cache_path, encryption_key)
         self.cache.load()
 
         self.client = PublicClientApplication(
@@ -210,7 +208,7 @@ class OneDriveComm:
         self,
         file_name,
         file_path,
-        upload_location_id,  # TODO change configuration check to before this is called, in the main plugin
+        upload_location_id,
         on_upload_progress=lambda x: None,
         on_upload_complete=lambda: None,
         on_upload_error=lambda x: None,
@@ -326,6 +324,10 @@ class OneDriveComm:
                         on_upload_error(response["error"])
                         return
 
+                    # TODO check status of upload
+                    # 202 = still uploading
+                    # 201/200 = complete
+
                     self._logger.debug(f"Chunk {i} upload complete")
 
         except Exception as e:
@@ -336,6 +338,58 @@ class OneDriveComm:
         # If we got this far... Everything worked?
         self._logger.info("Upload complete")
         on_upload_complete()
+
+        return {
+            "id": response.get("id", ""),
+            "eTag": response.get("eTag", ""),
+        }
+
+    def download_file(self, folder_id, file_name):
+        # https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems
+        # DriveItems can be addressed by path as above
+        if file_name[0] != "/":
+            file_name = f"/{file_name}"
+
+        item_url = f"{GRAPH_URL}/me/drive/items/{folder_id}:{urllib.parse.quote(file_name)}:/content"
+
+        try:
+            # try/except catch all for internet issues
+            with requests.get(item_url, headers=self._get_headers(), stream=True) as r:
+                error = self._check_status(r)
+                if type(error) == dict and "error" in error:
+                    return {"error": error["error"]}
+
+                from tempfile import NamedTemporaryFile
+
+                with NamedTemporaryFile(delete=False) as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+
+        except Exception as e:
+            self._logger.exception(e)
+            return {"error": UNKNOWN_ERROR}
+
+        return {"name": file_name, "path": f.name}
+
+    def delete_file(self, folder_id, file_name):
+        # https://docs.microsoft.com/en-us/graph/api/driveitem-delete?view=graph-rest-1.0&tabs=http
+        if file_name[0] != "/":
+            file_name = f"/{file_name}"
+
+        item_url = (
+            f"{GRAPH_URL}/me/drive/items/{folder_id}:{urllib.parse.quote(file_name)}"
+        )
+
+        try:
+            # try/except catch all for internet issues
+            response = self._graph_request(item_url, method="DELETE")
+            if "error" in response:
+                return {"error": response["error"]}
+
+        except Exception as e:
+            self._logger.exception(e)
+            return {"error": UNKNOWN_ERROR}
 
     def _get_headers(self) -> dict:
         token = self.client.acquire_token_silent_with_error(
@@ -389,8 +443,20 @@ class OneDriveComm:
             self._logger.exception(e)
             return {"error": UNKNOWN_ERROR}
 
+        error = self._check_status(response)
+        if error:
+            return error
+
+        # Finally, try return a json response
         try:
-            # Check status code - all errors will have an error code outside of 2xx-3xx
+            return response.json()
+        except Exception as e:
+            self._logger.exception(e)
+            return {"error": UNKNOWN_ERROR}
+
+    def _check_status(self, response):
+        try:
+            # Check status code - all errors will have an error code outside 2xx-3xx
             response.raise_for_status()
 
         except requests.RequestException as e:
@@ -404,13 +470,6 @@ class OneDriveComm:
             except Exception as e:
                 self._logger.exception(e)
                 return {"error": UNKNOWN_ERROR}
-
-        # Finally, try return a json response
-        try:
-            return response.json()
-        except Exception as e:
-            self._logger.exception(e)
-            return {"error": UNKNOWN_ERROR}
 
 
 class AuthInProgressError(Exception):
