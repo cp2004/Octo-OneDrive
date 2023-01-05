@@ -185,6 +185,27 @@ class OneDriveComm:
         else:
             return data["value"]
 
+    def file_info(self, name=None, id=None, root=None):
+        if not name and not id:
+            raise ValueError("Either name or id must be provided")
+
+        if name[0] == "/":
+            name = name[1:]
+
+        # Format a URL, either relative from root or given folder, or absolute with id
+        item_url = (
+            f"/me/drive/items/{root if root else 'root'}:/{name}"
+            if name
+            else f"/me/drive/items/{id}"
+        )
+
+        data = self._graph_request(item_url)
+
+        if "error" in data:
+            return {"error": data["error"]}  # No extra fields slipping in
+        else:
+            return data
+
     def upload_file(
         self,
         file_name,
