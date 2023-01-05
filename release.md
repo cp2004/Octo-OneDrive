@@ -13,4 +13,3 @@ Quite simple 🙂
 ## After release
 
 1. Bump version in OctoPrint-OneDrive-Backup plugin & OctoPrint-OneDriveFilesSync plugins - they are pinned to prevent the need for simultaneous releases for breaking changes & making testing easier.
-
