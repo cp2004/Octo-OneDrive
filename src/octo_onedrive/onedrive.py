@@ -344,7 +344,7 @@ class OneDriveComm:
             "eTag": response.get("eTag", ""),
         }
 
-    def download_file(self, folder_id, file_name):
+    def download_file(self, folder_id, file_name, timeout=30):
         # https://learn.microsoft.com/en-us/graph/onedrive-addressing-driveitems
         # DriveItems can be addressed by path as above
         if file_name[0] != "/":
@@ -354,7 +354,9 @@ class OneDriveComm:
 
         try:
             # try/except catch all for internet issues
-            with requests.get(item_url, headers=self._get_headers(), stream=True) as r:
+            with requests.get(
+                item_url, headers=self._get_headers(), stream=True, timeout=timeout
+            ) as r:
                 error = self._check_status(r)
                 if type(error) == dict and "error" in error:
                     return {"error": error["error"]}
