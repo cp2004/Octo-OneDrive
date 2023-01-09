@@ -192,7 +192,7 @@ class OneDriveComm:
 
         # Format a URL, either relative from root or given folder, or absolute with id
         item_url = (
-            f"/me/drive/items/{root if root else 'root'}:/{name}"
+            f"/me/drive/items/{root if root else 'root'}:/{urllib.parse.quote(name)}"
             if name
             else f"/me/drive/items/{id}"
         )
