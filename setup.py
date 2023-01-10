@@ -4,7 +4,11 @@ import versioneer
 
 NAME = "octo_onedrive"
 VERSION = versioneer.get_version()
-DEPENDENCIES = ["msal>=1.18.0,<2", "cryptography", "python-dateutil"]
+DEPENDENCIES = [
+    "msal>=1.18.0,<2",
+    "cryptography>=37,<=38",  # Pinned to work around PiWheels lack of available wheels
+    "python-dateutil"
+]
 
 with open("README.md", encoding="utf-8") as fh:
     long_description = fh.read()
