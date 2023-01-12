@@ -7,7 +7,7 @@ VERSION = versioneer.get_version()
 DEPENDENCIES = [
     "msal>=1.18.0,<2",
     "cryptography>=36,<=38",  # Pinned to work around PiWheels lack of available wheels
-    "python-dateutil"
+    "python-dateutil",
 ]
 
 with open("README.md", encoding="utf-8") as fh:
