@@ -6,7 +6,7 @@ NAME = "octo_onedrive"
 VERSION = versioneer.get_version()
 DEPENDENCIES = [
     "msal>=1.18.0,<2",
-    "cryptography>=36,<=38",  # Pinned to work around PiWheels lack of available wheels
+    "cryptography>=36,<38",  # Pinned to work around PiWheels lack of available wheels
     "python-dateutil",
 ]
 
