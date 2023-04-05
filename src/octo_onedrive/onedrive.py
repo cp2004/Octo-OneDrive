@@ -176,12 +176,26 @@ class OneDriveComm:
         else:
             location = f"items/{item_id}"
 
-        data = self._graph_request(f"/me/drive/{location}/children")
+        def request_list(url):
+            # Request the list of files and folders recursively, if there are more than 200
+            # items there is an @odata.nextLink field in the response that we can use
+            resp = self._graph_request(url)
+
+            if "error" in resp:
+                return {"error": resp["error"]}
+
+            else:
+                if "@odata.nextLink" in resp:
+                    return resp["value"] + request_list(resp["@odata.nextLink"])
+                else:
+                    return resp["value"]
+
+        data = request_list(f"/me/drive/{location}/children")
 
         if "error" in data:
             return {"error": data["error"]}  # No extra fields slipping in
         else:
-            return data["value"]
+            return data
 
     def file_info(self, name=None, id=None, root=None):
         if not name and not id:
